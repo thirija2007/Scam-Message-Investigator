@@ -2,10 +2,6 @@ import streamlit as st
 import requests
 import json
 
-# Application Configuration
-MODEL = "gemma3:1b"
-OLLAMA_URL = "http://localhost:11434/api/chat"
-
 # Page Configuration
 st.set_page_config(
     page_title="Scam Message Investigator",
