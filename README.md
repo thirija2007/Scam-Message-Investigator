@@ -7,6 +7,10 @@ Scam Message Investigator is a Python-based AI application that analyzes suspici
 
 It uses **Gemma 3 1B through Ollama** to identify possible scam indicators, classify concern levels, explain warning signs, and recommend safety actions.
 
+## Demo Link:
+
+https://scam-message-investigator-i28be4cegh2vhx8qtbup9u.streamlit.app/
+
 ##  Key Features
 - Accepts suspicious message text from users.
 - Uses Gemma 3 1B for AI-powered analysis.
