@@ -2,199 +2,213 @@ import streamlit as st
 import requests
 import json
 
-# Page Configuration
+MODEL_NAME = "gemma3:1b"
+LOCAL_AI_URL = "http://localhost:11434/api/chat"
+
 st.set_page_config(
     page_title="Scam Message Investigator",
     page_icon="🔍",
     layout="centered"
 )
 
-# Application Title
 st.title("🔍 Scam Message Investigator")
+
 st.write(
-    "Analyze suspicious SMS messages, emails, job offers "
-    "and online messages using a local AI model."
+    "An AI-based tool to examine suspicious SMS, emails, "
+    "job advertisements and online messages."
 )
 
-st.info("Your message is analyzed using Ollama and Gemma locally.")
+try:
+    API_KEY = st.secrets["GROQ_API_KEY"]
+except Exception:
+    API_KEY = None
 
-# Function to investigate messages
-def investigate_message(message):
+if API_KEY:
+    st.info("AI analysis is running through the hosted API.")
+else:
+    st.info("AI analysis is using the local Gemma model.")
 
-    prompt = f"""
-You are an expert scam message investigator.
+user_input = st.text_area(
+    "Enter a message for checking:",
+    placeholder="Paste a suspicious message here...",
+    height=180
+)
 
-Analyze the following message and return a JSON object.
+# Instructions for the AI model
+PROMPT = """
+You are an AI Scam Message Investigator.
 
-Message:
-{message}
+Examine the given message and provide the result ONLY in valid JSON.
 
-Return ONLY valid JSON using this structure:
+Follow this JSON format:
 
-{{
-    "concern_level": "Low Concern, Medium Concern, or High Concern",
-    "message_type": "SMS, Email, Job Offer, or Other",
-    "summary": "Brief explanation of the message",
-    "warning_signs": [
-        "Warning sign 1",
-        "Warning sign 2"
-    ],
-    "recommended_actions": [
-        "Safety action 1",
-        "Safety action 2"
-    ],
-    "limitations": "Explain what cannot be verified"
-}}
+{
+  "concern_level": "Low Concern, Medium Concern, or High Concern",
+  "message_type": "SMS, Email, Job Offer, or Other",
+  "summary": "Brief explanation of the message",
+  "warning_signs": ["Warning sign 1"],
+  "recommended_actions": ["Recommended action 1"],
+  "limitations": ["Limitation 1"]
+}
 
-Use evidence from the message.
-Do not assume that every message is a scam.
-Do not treat a low concern result as proof of safety.
+Analysis guidelines:
+- Check for suspicious links and urgent requests.
+- Look for OTP, password and money-related requests.
+- Identify requests for private or personal details.
+- Give reasons based on the actual message.
+- Do not label every unknown message as a scam.
+- Do not guarantee that any message is completely safe.
+- Return only JSON without additional text.
 """
 
-    payload = {
-        "model": MODEL,
-        "messages": [
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ],
-        "stream": False,
-        "format": "json"
-    }
 
-    response = requests.post(
-        OLLAMA_URL,
-        json=payload,
-        timeout=120
-    )
+def check_scam(text):
 
-    response.raise_for_status()
+    chat_messages = [
+        {"role": "system", "content": PROMPT},
+        {"role": "user", "content": text}
+    ]
 
-    result = response.json()
+    # Use Groq when an API key is available
+    if API_KEY:
 
-    ai_response = result["message"]["content"]
+        result = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "openai/gpt-oss-20b",
+                "messages": chat_messages,
+                "response_format": {"type": "json_object"}
+            },
+            timeout=120
+        )
 
-    report = json.loads(ai_response)
+        result.raise_for_status()
+
+        ai_result = result.json()["choices"][0]["message"]["content"]
+
+    # Otherwise, use the local Gemma model
+    else:
+
+        result = requests.post(
+            LOCAL_AI_URL,
+            json={
+                "model": MODEL_NAME,
+                "messages": chat_messages,
+                "stream": False,
+                "format": "json"
+            },
+            timeout=180
+        )
+
+        result.raise_for_status()
+
+        ai_result = result.json()["message"]["content"]
+
+    # Convert AI response into a Python dictionary
+    report = json.loads(ai_result)
+
+    # Check whether all required details are present
+    required_keys = [
+        "concern_level",
+        "message_type",
+        "summary",
+        "warning_signs",
+        "recommended_actions",
+        "limitations"
+    ]
+
+    for key in required_keys:
+        if key not in report:
+            raise ValueError("Required information is missing: " + key)
+
+    if report["concern_level"] not in [
+        "Low Concern",
+        "Medium Concern",
+        "High Concern"
+    ]:
+        raise ValueError("The AI returned an invalid concern level.")
 
     return report
 
 
-# User Input
-st.subheader("📩 Enter Your Message")
+# Analyze button
+if st.button("🔍 Analyze Message", type="primary"):
 
-message = st.text_area(
-    "Paste the suspicious message here:",
-    height=180,
-    placeholder="Enter SMS, email, job offer or online message..."
-)
-
-# Investigation Button
-if st.button("🔍 Investigate Message", use_container_width=True):
-
-    if not message.strip():
-        st.warning("Please enter a message before investigating.")
+    if not user_input.strip():
+        st.warning("Please enter a message before starting the analysis.")
 
     else:
-        with st.spinner("AI is analyzing your message..."):
+        try:
+            with st.spinner("Please wait... AI is checking the message."):
 
-            try:
-                report = investigate_message(message)
+                result = check_scam(user_input)
 
-                st.success("Investigation Completed!")
+            st.success("Message analysis completed!")
 
-                # Display Concern Level
-                st.subheader("📊 Investigation Report")
+            st.subheader("Scam Investigation Report")
 
-                concern = report.get(
-                    "concern_level",
-                    "Not available"
-                )
+            level = result["concern_level"]
 
-                if concern == "High Concern":
-                    st.error(f"🚨 {concern}")
+            if level == "High Concern":
+                st.error("🚨 " + level)
 
-                elif concern == "Medium Concern":
-                    st.warning(f"⚠️ {concern}")
+            elif level == "Medium Concern":
+                st.warning("⚠️ " + level)
 
-                else:
-                    st.success(f"✅ {concern}")
+            else:
+                st.success("✅ " + level)
 
-                # Display Message Details
-                st.write("**Message Type:**",
-                         report.get("message_type", "Not available"))
+            st.write("**Message Category:**", result["message_type"])
 
-                st.write("**Summary:**",
-                         report.get("summary", "Not available"))
+            st.subheader("Message Summary")
+            st.write(result["summary"])
 
-                # Warning Signs
-                st.subheader("⚠️ Warning Signs")
+            st.subheader("Identified Warning Signs")
+            for item in result["warning_signs"]:
+                st.write("⚠️", item)
 
-                for sign in report.get("warning_signs", []):
-                    st.write("•", sign)
+            st.subheader("Suggested Safety Actions")
+            for item in result["recommended_actions"]:
+                st.write("✔️", item)
 
-                # Recommended Actions
-                st.subheader("🛡️ Recommended Safety Actions")
+            st.subheader("Analysis Limitations")
+            for item in result["limitations"]:
+                st.write("•", item)
 
-                for action in report.get(
-                    "recommended_actions", []
-                ):
-                    st.write("•", action)
+            # Display complete report
+            with st.expander("View Complete JSON Output"):
+                st.json(result)
 
-                # Limitations
-                st.subheader("ℹ️ Limitations")
+        except requests.exceptions.ConnectionError:
+            st.error("Unable to connect to the AI service. Please check the service connection.")
 
-                st.write(
-                    report.get("limitations", "Not available")
-                )
+        except requests.exceptions.Timeout:
+            st.error("The AI service took too long to respond. Try again.")
 
-                # Download Report
-                report_json = json.dumps(
-                    report,
-                    indent=4,
-                    ensure_ascii=False
-                )
+        except requests.exceptions.HTTPError as error:
+            st.error("API request failed: " + str(error))
 
-                st.download_button(
-                    label="⬇️ Download Investigation Report",
-                    data=report_json,
-                    file_name="scam_investigation_report.json",
-                    mime="application/json"
-                )
+        except (json.JSONDecodeError, KeyError, ValueError) as error:
+            st.error("Unable to process the AI response: " + str(error))
 
-            except requests.exceptions.ConnectionError:
-                st.error(
-                    "Cannot connect to Ollama. "
-                    "Please make sure Ollama is running."
-                )
-
-            except requests.exceptions.Timeout:
-                st.error(
-                    "The AI model took too long to respond. "
-                    "Please try again."
-                )
-
-            except requests.exceptions.RequestException as e:
-                st.error(f"Ollama API Error: {e}")
-
-            except (json.JSONDecodeError, KeyError, TypeError):
-                st.error(
-                    "Invalid AI response. Please try investigating again."
-                )
-
-            except Exception as e:
-                st.error(f"Unexpected Error: {e}")
+        except Exception as error:
+            st.error("An unexpected problem occurred: " + str(error))
 
 
-# Footer
+# Footer information
 st.divider()
 
 st.caption(
-    "Scam Message Investigator | Week 8 LLM Practical Project"
+    "Scam Message Investigator | Python, Streamlit, "
+    "Ollama, Gemma 3 1B and Groq API"
 )
 
 st.caption(
-    "Disclaimer: AI-generated results are not a guarantee "
-    "that a message is genuine or fraudulent. Always verify "
-    "through official sources."
+    "AI predictions may not always be accurate. "
+    "Confirm suspicious messages using official sources. "
+    "Never share your real OTP, password or PIN."
 )
